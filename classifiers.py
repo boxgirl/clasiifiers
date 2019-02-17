@@ -144,7 +144,7 @@ def mygi(Ys:List):
 		gini += (1.0 - score) * (size / count)
 	return gini
 
-class DesicionTreeClassifier(BaseClassifier):
+class DecisionTreeClassifier(BaseClassifier):
 	
 	def __init__(self,file_path:Path):
 		super().__init__(file_path)
@@ -250,7 +250,7 @@ def stratified_split(n_folders:int,mode:str,model_standart:Any,my_model:Any, X:n
 
 	return np.asarray(X_test),np.asarray(y_pred),np.asarray(y_test)
 
-my_models=[GaussianClassifier(f_path),DesicionTreeClassifier(f_path)]
+my_models=[GaussianClassifier(f_path),DecisionTreeClassifier(f_path)]
 for my_m,m in zip(my_models,models):
 	bc=my_m
 	stratified_split(VALIDATION_FOLDERS,mode[0],m,bc,bc.X,bc.Y)
