@@ -12,7 +12,7 @@ from typing import Any
 from mpl_toolkits.mplot3d import Axes3D
 from sklearn.decomposition import PCA,SparsePCA
 import graphviz 
-from typing import List
+from typing import List,Dict
 
 
 models=[naive_bayes.GaussianNB(),tree.DecisionTreeClassifier()]
@@ -55,10 +55,11 @@ class BaseClassifier:
 	def classes_viz(self):
 		x_min, x_max = self.X[:, 0].min() - .5, self.X[:, 0].max() + .5
 		y_min, y_max = self.X[:, 1].min() - .5, self.X[:, 1].max() + .5
+
+		
 		plt.figure(2, figsize=(8, 6))
 		plt.clf()
 
-		# Plot the training points
 		plt.scatter(self.X[:, 0], self.X[:, 1], c=self.Y, cmap=plt.cm.Set1,
 		            edgecolor='k')
 		plt.xlabel('sparsePCA_1')
@@ -69,25 +70,8 @@ class BaseClassifier:
 		plt.xticks(())
 		plt.yticks(())
 
-		plt.figure(2, figsize=(8, 6))
-		plt.clf()
-
-		# Plot the training points
-		plt.scatter(self.X[:, 0], self.X[:, 1], c=self.Y, cmap=plt.cm.Set1,
-		            edgecolor='k')
-		plt.xlabel('sparsePCA_1')
-		plt.ylabel('sparsePCA_2')
-
-		plt.xlim(x_min, x_max)
-		plt.ylim(y_min, y_max)
-		plt.xticks(())
-		plt.yticks(())
-
-		# To getter a better understanding of interaction of the dimensions
-		# plot the first three PCA dimensions
 		fig = plt.figure(1, figsize=(8, 6))
 		ax = Axes3D(fig, elev=-150, azim=110)
-		#X_reduced = PCA(n_components=3).fit_transform(self.data)
 		ax.scatter(self.X[:, 0], self.X[:, 1],self.X[:, 2], c=self.Y,
 		           cmap=plt.cm.Set1, edgecolor='k', s=40)
 		ax.set_title("First three PCA directions")
@@ -148,6 +132,17 @@ class GaussianClassifier(BaseClassifier):
 		df=pd.DataFrame(data=predict)
 		return  self.classes[df.values.argmax(axis=0)]
 
+def mygi(Ys:List):
+	count = sum(list(map(len,Ys)))
+	gini = 0
+	for Y in Ys:
+		size = Y.shape[0]
+		if size == 0:
+			continue
+		score = np.bincount(Y) / float(size)
+		score = np.sum(score * score)
+		gini += (1.0 - score) * (size / count)
+	return gini
 
 class DesicionTreeClassifier(BaseClassifier):
 	
@@ -155,7 +150,7 @@ class DesicionTreeClassifier(BaseClassifier):
 		super().__init__(file_path)
 		self._initialized = False
 	
-	def predict_row(self,tree,row):
+	def predict_row(self,tree:Dict,row:pd.core.series.Series):
 		if row[tree['index']] < tree['value']:
 				if isinstance(tree['left'], dict):
 					return self.predict_row(tree['left'], row)
@@ -167,7 +162,7 @@ class DesicionTreeClassifier(BaseClassifier):
 				else:
 					return tree['right']
 
-	def predict(self,test):
+	def predict(self,test:pd.core.frame.DataFrame):
 		self.check_init()
 		res=[]
 		for idx, row in test.iterrows():
@@ -176,54 +171,27 @@ class DesicionTreeClassifier(BaseClassifier):
 
 	def get_split(self,X_train:pd.core.frame.DataFrame,y_train:pd.core.series.Series):
 		b_index, b_value, b_score, b_groups = 999, 999, 999, []
-		for index in range(X_train.shape[1]):
-			for idx,row in X_train.iterrows():
-				groups = self.get_groups(index, row[index], X_train,y_train)
-				gini = self.gini_index(groups)
+		for index, column in enumerate(X_train.columns):
+			cdata = X_train[column].sort_values()
+			Y = y_train[cdata.index]
+			cdata = cdata.reset_index(drop=True)
+			Y = Y.reset_index(drop=True)
+			cdata = cdata.values
+			for idx in range(cdata.shape[0]):
+				gini = mygi([Y[idx:], Y[:idx]])
 				if gini < b_score:
-					print('here')
-					# current b_index = best column for spliting , row[index] - value in this column 
-					b_index, b_value, b_score, b_groups = index, row[index], gini, groups
+					b_index, b_value, b_score, b_groups = index, cdata[idx], gini, [X_train[:idx], Y[:idx], X_train[idx:], Y[idx:]]
 		# absolute best 
 		return {'index':b_index, 'value':b_value, 'groups':b_groups}
 	
-	def get_groups(self,index:int, value:float, X_train:pd.core.frame.DataFrame,y_train:pd.core.series.Series):
-		X_left, X_right = pd.DataFrame(),pd.DataFrame()
-		for idx,row in X_train.iterrows():
-			if row[index] < value:
-				X_left=X_left.append([row,],ignore_index=False)
-			else:
-				X_right=X_right.append(row,ignore_index=False)
-		y_left=y_train[X_left.index.values]
-		y_right=y_train[X_right.index.values]
-		return [X_left,y_left, X_right,y_right]
-	
-	def gini_index(self,groups:List[pd.core.frame.DataFrame]):
-		# count all samples at split point
-		n_instances = sum(list(map(len,groups)))/2
-		# sum weighted Gini index for each group
-		gini = 0
-		for i in range(0,len(groups),2):
-			size = len(groups[i])
-			# avoid divide by zero
-			if size == 0:
-				continue
-			# score the group based on the score for each class
-			score = sum(pow(groups[i+1].value_counts() / size,2))
-			# weight the group score by its relative size
-			gini += (1.0 - score) * (size / n_instances)
-		return gini
-
-	def to_terminal(self,group):
-		print(group)
-		return max(group.value_counts())
+	def to_terminal(self,group:pd.core.series.Series):
+		return np.argmax(np.bincount(group))
 	 
-	# Create child splits for a node or make terminal
-	def split(self,node, depth):
+	def split(self,node:Dict, depth:int):
 		left,y_left, right,y_right = node['groups']
 		del(node['groups'])
 		# check for a no split
-		if left.empty or right.empty:
+		if left.shape[0] == 0 or right.shape[0] == 0:
 			y_gen=y_left.append(y_right)
 			node['left'] = node['right'] = self.to_terminal(y_gen)
 			return
@@ -251,9 +219,9 @@ class DesicionTreeClassifier(BaseClassifier):
 
 	def build_tree(self,X_train:pd.core.frame.DataFrame,y_train:pd.core.series.Series):
 		root = self.get_split(X_train,y_train)
-		print(root)
 		self.split(root, 1)
 		return root
+
 
 
 def get_standart_res(model:Any,X_train:pd.core.frame.DataFrame,y_train:pd.core.series.Series,X_test:pd.core.frame.DataFrame,y_test:pd.core.series.Series):
@@ -288,10 +256,3 @@ for my_m,m in zip(my_models,models):
 	stratified_split(VALIDATION_FOLDERS,mode[0],m,bc,bc.X,bc.Y)
 	bc.X,bc.Y,real_Y=stratified_split(TEST_FOLDERS,mode[1],m,bc,bc.X,bc.Y)
 bc.classes_viz()
-
-
-'''print('Model {}\nAccuracy:{}\nRecall:{}\nPrecision:{}\n'.format(models[0],
-	metrics.accuracy_score(y_test,y_pred),
-	metrics.recall_score(y_test,y_pred,average=None),
-	metrics.precision_score(y_test,y_pred,average=None)))
-'''
